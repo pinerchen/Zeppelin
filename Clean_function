@@ -1,0 +1,3 @@
+// import before starting spark
+%dep
+z.load("org.scalanlp:jblas:1.2.1")
