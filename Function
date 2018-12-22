@@ -1,0 +1,15 @@
+// DoubleMatrix
+import org.jblas.DoubleMatrix
+// 定义相似度函数
+def cosineSimilarity(vec1: DoubleMatrix, vec2: DoubleMatrix): Double = {
+    vec1.dot(vec2) / (vec1.norm2() * vec2.norm2())
+}
+
+// functions
+
+// join table
+val productID_mapping = product_mapping.join(product_description,Seq("product"),"left_outer")
+
+
+// save to s3
+data_frame_name.option("header","true").format("csv").mode("overwrite").save("s3://recommendation-table-mapping/productID_mapping.csv")
