@@ -13,3 +13,23 @@ val productID_mapping = product_mapping.join(product_description,Seq("product"),
 
 // save to s3
 data_frame_name.option("header","true").format("csv").mode("overwrite").save("s3://recommendation-table-mapping/productID_mapping.csv")
+
+
+//
+val itemFactors = model.productFeatures.map { case (id, factor) => factor }.collect()
+    val itemMatrix = new DoubleMatrix(itemFactors)
+    val imBroadcast = sc.broadcast(itemMatrix)
+    val allRecs = model.userFeatures.map{ case (userId, array) =>
+        val userVector = new DoubleMatrix(array)
+        val scores = imBroadcast.value.mmul(userVector)
+        val sortedWithId = scores.data.zipWithIndex.sortBy(-_._1)
+        val recommendedIds = sortedWithId.map(_._2 + 1).toSeq
+        (userId, recommendedIds)
+    }
+val userMovies = tableRDD.map{ case Rating(user, product, rating) => (user, product) }.groupBy(_._1)
+val K = 10
+val MAPK = allRecs.join(userMovies).map{ case (userId, (predicted, actualWithIds)) =>
+      val actual = actualWithIds.map(_._2).toSeq
+      avgPrecisionK(actual, predicted, K)
+    }.reduce(_ + _) / allRecs.count
+   
