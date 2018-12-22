@@ -15,7 +15,7 @@ val productID_mapping = product_mapping.join(product_description,Seq("product"),
 data_frame_name.option("header","true").format("csv").mode("overwrite").save("s3://recommendation-table-mapping/productID_mapping.csv")
 
 
-//
+//手動MAPK
 val itemFactors = model.productFeatures.map { case (id, factor) => factor }.collect()
     val itemMatrix = new DoubleMatrix(itemFactors)
     val imBroadcast = sc.broadcast(itemMatrix)
@@ -32,4 +32,106 @@ val MAPK = allRecs.join(userMovies).map{ case (userId, (predicted, actualWithIds
       val actual = actualWithIds.map(_._2).toSeq
       avgPrecisionK(actual, predicted, K)
     }.reduce(_ + _) / allRecs.count
+    
+  // percentile ranking
+  def expectedPercentileRanking(model: MatrixFactorizationModel, ratings: RDD[Rating]) = {
+    val itemFactors = model.productFeatures.collect() //itemFactors: Array[(Int, Array[Double])]
+    val itemMatrix = new DoubleMatrix(itemFactors.map(_._2)) //[Double]
+    val imBroadCast = sc.broadcast(itemMatrix)
+    val itemListPerUser = ratings.groupBy(_.user).map {
+      case (user, ratingList) => (user, ratingList.map(rt => (rt.product, rt.rating)).toArray)
+    }
+    // itemListPerUser: [(Int, Array[(Int, Double)])]
+    val rankRDD = model.userFeatures.join(itemListPerUser).map {
+        //(Int,     (Array[Double], Array[(Int, Double)]))
+      case (userId, (userFeatures, itemRatingList)) =>
+        val userVector = new DoubleMatrix(userFeatures)
+        val scores = imBroadCast.value.mmul(userVector) //用戶對各產品喜好分數乘積
+        
+        val sortedWithId = scores.data.zipWithIndex.sortBy(-_._1) //A. User 產品偏好分數由大到小排列
+        val itemsOrderedByPref = sortedWithId.map(_._2 + 1).toSeq // B. 抓取User喜好順序的對應產品ID ex. User0 : [P4,P3,P1]
+        
+        val rankWeightedByRating = itemRatingList.map {
+          case (itemId, rating) =>
+            rating *itemsOrderedByPref.indexOf(itemId).toDouble / (itemsOrderedByPref.size - 1)
+        
+        }.sum
+        rankWeightedByRating
+    }
+    
+    //rankRDD.take(3).foreach(println)
+    val weightedRankOverAll = rankRDD.sum()
+    val sumWeight = ratings.map(_.rating).sum()
+    weightedRankOverAll / sumWeight
+    
+  }
+  
+  
+  // top sale percentile ranking
+  // 1. top sale ranking.
+// 2. percentile ranking of testset item.
+
+//val top_sale =  training_final.groupBy("productID").agg(sum("rating").alias("Total_Amount")).sort($"Total_Amount".desc).drop("Total_Amount")
+//val topSale_List = top_sale.select("productID").collect().map(_(0)).toList
+
+def topSalePercentileRanking(TopSale: Seq[Any], ratings: RDD[Rating]) = {
+    
+    //val List =  whole.groupBy("productID").agg(sum("rating").alias("Total_Amount")).sort($"Total_Amount".desc).drop("Total_Amount")
+    //val topSale_List = top_sale.select("productID").collect().map(_(0)).toList
+    
+    val itemListPerUser = ratings.groupBy(_.user).map {
+      case (user, ratingList) => (user, ratingList.map(rt => (rt.product, rt.rating)).toArray)
+    }
+    val rankRDD_top = itemListPerUser.map {
+      case (userId, itemRatingList) =>
+
+        
+        val rankWeightedByRating = itemRatingList.map {
+          case (itemId, rating) =>
+             rating * TopSale.indexOf(itemId).toDouble / (TopSale.size - 1)
+        
+        }.sum
+        rankWeightedByRating
+    }
+    //rankRDD_top.take(3).foreach(println)
+    val weightedRankOverAll = rankRDD_top.sum()
+    val sumWeight = ratings.map(_.rating).sum()
+    weightedRankOverAll / sumWeight
+  }
+  
+  
+// Corss Validation Model
+    val ranks = Array(8,12)
+    val lambdas = Array(0.01)
+    val alphas = Array(40,0.01)
+    val numIters = Array(4)
+    var bestModel: Option[MatrixFactorizationModel] = None
+    var bestRanking = 99.0
+    var bestRank = 0
+    var bestLambda = -1.0
+    var bestNumIter = -1
+    var bestAlpha = 0
+    
+   for (rank <- ranks; lambda <- lambdas; numIter <- numIters; alpha <- alphas ) {
+      val model = ALS.trainImplicit(trainRDD, rank, numIter, lambda, alpha)
+      val rank_in = expectedPercentileRanking(model, tableRDD)
+      println("Percentil Ranking = " + rank_in + " for the model trained with rank = "
+        + rank + 
+        ", lambda = " + lambda + 
+        ", alpha = " + alpha + 
+        ", and numIter = " + numIter + ".")
+      if (rank_in < bestRanking) {
+        bestModel = Some(model)
+        bestRanking = rank_in
+        bestRank = rank
+        bestLambda = lambda
+        bestNumIter = numIter
+        bestAlpha = alpha
+      }
+    }
+
+    val test_PercentileRanking = rank_in
+
+    println("The best model was trained with ranking = " + bestRanking + " and rank = " + bestRank + " and lambda = " + bestLambda
+      + ", and numIter = " + bestNumIter + ", and its RMSE on the test set is " + test_PercentileRanking + ".")
    
