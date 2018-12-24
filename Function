@@ -100,7 +100,7 @@ def topSalePercentileRanking(TopSale: Seq[Any], ratings: RDD[Rating]) = {
   }
   
   
-// Corss Validation Model
+// Cross Validation Model
     val ranks = Array(8,12)
     val lambdas = Array(0.01)
     val alphas = Array(40,0.01)
