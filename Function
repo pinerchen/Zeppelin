@@ -1,3 +1,8 @@
+// load before spark starts.
+
+%dep
+z.load("org.scalanlp:jblas:1.2.1")
+
 // DoubleMatrix
 import org.jblas.DoubleMatrix
 // 定义相似度函数
@@ -7,12 +12,120 @@ def cosineSimilarity(vec1: DoubleMatrix, vec2: DoubleMatrix): Double = {
 
 // functions
 
-// join table
+// join table, drop duplicated column
 val productID_mapping = product_mapping.join(product_description,Seq("product"),"left_outer")
 
 
-// save to s3
-data_frame_name.option("header","true").format("csv").mode("overwrite").save("s3://recommendation-table-mapping/productID_mapping.csv")
+// save Parquet to s3
+data_frame_name.option("header","true").mode("overwrite").save("s3://lenovorecosys/delivery1/Parquet_For_Athena/Top_Parquet")
+
+// save csv to s3 (array in column not acceptable)
+data_frame_name.option("header","true").format("csv").mode("overwrite").save("s3://lenovorecosys/delivery1/Parquet_For_Athena/Top_Parquet")
+
+// expectedPercentileRanking
+def expectedPercentileRanking(model: MatrixFactorizationModel, ratings: RDD[Rating]) = {
+    val itemFactors = model.productFeatures.collect() //itemFactors: Array[(Int, Array[Double])]
+    val itemMatrix = new DoubleMatrix(itemFactors.map(_._2)) //[Double]
+    val imBroadCast = sc.broadcast(itemMatrix)
+    val itemListPerUser = ratings.groupBy(_.user).map {
+      case (user, ratingList) => (user, ratingList.map(rt => (rt.product, rt.rating)).toArray)
+    }
+    // itemListPerUser: [(Int, Array[(Int, Double)])]
+    val rankRDD = model.userFeatures.join(itemListPerUser).map {
+        //(Int,     (Array[Double], Array[(Int, Double)]))
+      case (userId, (userFeatures, itemRatingList)) =>
+        val userVector = new DoubleMatrix(userFeatures)
+        val scores = imBroadCast.value.mmul(userVector) //用戶對各產品喜好分數乘積
+        
+        val sortedWithId = scores.data.zipWithIndex.sortBy(-_._1) //A. User 產品偏好分數由大到小排列
+        val itemsOrderedByPref = sortedWithId.map(_._2).toSeq // B. 抓取User喜好順序的對應產品ID ex. User0 : [P4,P3,P1]
+        
+        val rankWeightedByRating = itemRatingList.map {
+          case (itemId, rating) =>
+            rating *itemsOrderedByPref.indexOf(itemId).toDouble / (itemsOrderedByPref.size - 1)
+        
+        }.sum
+        rankWeightedByRating
+    }
+    
+    //rankRDD.take(3).foreach(println)
+    val weightedRankOverAll = rankRDD.sum()
+    val sumWeight = ratings.map(_.rating).sum()
+    weightedRankOverAll / sumWeight
+    
+  }
+  
+  
+// top Sale Percentile Ranking
+def topSalePercentileRanking(TopSale: Seq[Any], ratings: RDD[Rating]) = {
+    
+    //val List =  whole.groupBy("productID").agg(sum("rating").alias("Total_Amount")).sort($"Total_Amount".desc).drop("Total_Amount")
+    //val topSale_List = top_sale.select("productID").collect().map(_(0)).toList
+    
+    val itemListPerUser = ratings.groupBy(_.user).map {
+      case (user, ratingList) => (user, ratingList.map(rt => (rt.product, rt.rating)).toArray)
+    }
+    val rankRDD_top = itemListPerUser.map {
+      case (userId, itemRatingList) =>
+
+        
+        val rankWeightedByRating = itemRatingList.map {
+          case (itemId, rating) =>
+             rating * TopSale.indexOf(itemId).toDouble / (TopSale.size - 1)
+        
+        }.sum
+        rankWeightedByRating
+    }
+    //rankRDD_top.take(3).foreach(println)
+    val weightedRankOverAll = rankRDD_top.sum()
+    val sumWeight = ratings.map(_.rating).sum()
+    weightedRankOverAll / sumWeight
+  }
+  
+// avgPrecision
+def avgPrecisionK(actual:Seq[Int],predicted:Seq[Int],k:Int):Double = {
+    val predK = predicted.take(k)
+    var score = 0.0
+    var numHits = 0.0
+    for((p,i) <- predK.zipWithIndex){
+        if(actual.contains(p)){
+            numHits += 1.0
+            score += numHits / (i.toDouble + 1.0)
+        }
+    }
+    if (actual.isEmpty)
+    {
+        1.0
+    }else{
+        score / scala.math.min(actual.size,k).toDouble
+    }
+}
+
+// topSale avgPrecision
+def topSale_avgPrecisionK(actual:Seq[Int],predicted:Seq[Any],k:Int):Double = {
+    val predK = predicted.take(k)
+    var score = 0.0
+    var numHits = 0.0
+    for((p,i) <- predK.zipWithIndex){
+        if(actual.contains(p)){
+            numHits += 1.0
+            score += numHits / (i.toDouble + 1.0)
+        }
+    }
+    if (actual.isEmpty)
+    {
+        1.0
+    }else{
+        score / scala.math.min(actual.size,k).toDouble
+    }
+}
+
+
+
+
+
+
+
 
 
 //手動MAPK
