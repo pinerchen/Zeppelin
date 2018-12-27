@@ -137,13 +137,19 @@ def topSalePercentileRanking(TopSale: Seq[Any], ratings: RDD[Rating]) = {
       
       
    // flat recommendation Array to columns
-   val flat_Recs = allRecs_test.toDF().select($"_1".alias("UserID"),$"_2".alias("RecItems")).flatMap((row: Row) => {
-    val userID = row.getInt(0)
-    val recommendations = row.getSeq[Row](1)
-    recommendations.map {
-      case Row(item1:String, item2: String, item3:String, item4: String, item5:String, item6: String, item7:String, item8: String, item9:String, item10: String) => {
-        (userID,item1,item2,item3,item4,item5,item6,item7,item8,item9,item10)
-      }
-    }
-  }).toDF("userID","item1","item2","item3","item4","item5","item6","item7","item8","item9","item10")
+   val recommend_20Items = model.recommendProductsForUsers(20)
+   val product = product_mapping.rdd.map(array=>(array(1),array(0))).collectAsMap()
    
+  val allRecs = recommend_20Items.map{ case (userId, array) =>
+    val recommendedIds = array.map{ case Rating(user,product,rating) => (product) }
+    val product_name = recommendedIds.map{case id => product(id).toString}.toSeq
+    (userId, product_name)
+    }
+    
+    val userRecs_array = allRecs.toDF.select($"_1".alias("UserID"),$"_2".alias("Product_Array"))
+
+import org.apache.spark.sql.Column
+def getColAtIndex(id:Int): Column = col(s"Product_Array")(id).as(s"product_${id+1}")
+val columns: IndexedSeq[Column] = col("userID") +: (0 to 19).map(getColAtIndex)   //Here, instead of 2, you can give the value of n
+val userRecs_array_flat = userRecs_array.select(columns: _*)
+  
