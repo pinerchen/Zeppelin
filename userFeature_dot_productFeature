@@ -1,0 +1,19 @@
+val allRecs_test = model.userFeatures.map{ case (userId, array) =>
+  val userVector = new DoubleMatrix(array)
+  val scores = imBroadcast.value.mmul(userVector)
+  val sortedWithId = scores.data.zipWithIndex.sortBy(-_._1)
+  val recommendedIds = sortedWithId.map(_._2)
+  val product_name = recommendedIds.map{case id => product(id).toString}.toSeq.take(10)
+  (userId, product_name)
+    }
+
+
+
+val allRecs_test = model.userFeatures.map{ case (userId, array) =>
+  val userVector = new DoubleMatrix(array)
+  val scores = imBroadcast.value.mmul(userVector)
+  val sortedWithId = scores.data.zipWithIndex.sortBy(-_._1)
+  val recommendedIds = sortedWithId.map(_._2)
+  val product_name = recommendedIds.map{case id => product(id).toString}.toSeq.take(10)
+  (userId, product_name)
+    }
