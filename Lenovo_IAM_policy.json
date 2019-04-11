@@ -1,0 +1,37 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ec2:*",
+                "logs:*",
+                "cloudwatch:*",
+                "elasticmapreduce:*",
+                "cloudformation:*",
+                "sdb:*"
+            ],
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "aws:RequestedRegion": "us-east-1"
+                }
+            }
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "iam:*",
+                "s3:*",
+                "sts:AssumeRole",
+                "kms:ListKeys",
+                "kms:ListKeyPolicies",
+                "kms:ListRetirableGrants",
+                "kms:ListAliases",
+                "kms:ListGrants",
+                "kms:DescribeKey"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
